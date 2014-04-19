@@ -2,9 +2,21 @@
 #include <LiquidCrystal.h>
 #include <inttypes.h>
 
+// General IO pins
 const int led = 13;
 const int navBtn = 10;
 const int selBtn = 11;
+
+// Motor Control
+const int MCDirA = 22;
+const int MCDirB = 23;
+const int MCFullSpeed = 24;
+const int MCVarSpeed = 25;
+const int MCVSA = 26;
+const int MCVSB = 27;
+
+// Pressure Sensor
+const int pressureSensor = 0;
 
 // Wheel Encoder variables
 const int WEA = 2;  // int0
@@ -12,6 +24,14 @@ const int WEB = 3;  // int1
 volatile int WECounts = 0;
 volatile int WEError = 0;
 volatile byte last_aVal, last_bVal;
+
+// Timer vals
+volatile int lastCount = 0;
+volatile boolean upwards = false;
+volatile boolean downwards = false;
+volatile int stall = 0;
+volatile int countDiff = 0;
+const int speedThreshold = 50;
 
 // initialize LC library with the pins to be used
 // Pin2 = rs
@@ -23,13 +43,41 @@ volatile byte last_aVal, last_bVal;
 //LiquidCrystal lcd(2,3,4,5,6,7);
 LiquidCrystal lcd(4,5,6,7,8,9);
 
-// Define State Machine
+// Define Main State Machine
 const byte waitForInput = 1;  // Wait on user input
 const byte navBtnPressed = 2;   // Navigation button pressed
 const byte selBtnPressed = 3;   // Select button pressed
+boolean returnToMainMenu = false;
+
+// defines for lift subroutine
+const byte barInRack = 1;
+const byte downwardState = 2;
+const byte upwardState = 3;
+
+// defines for calibrate subroutine
+int topVal = 100;
+int bottomVal = -100;
+
+// flags
+boolean calibrateFlag = false;
+boolean liftingFlag = false;
 
 void configPins()
 {
+  // Motor Control
+  pinMode(MCDirA, OUTPUT);
+  digitalWrite(MCDirA, LOW);
+  pinMode(MCDirB, OUTPUT);
+  digitalWrite(MCDirB, LOW);
+  pinMode(MCFullSpeed, OUTPUT);
+  digitalWrite(MCFullSpeed, LOW);
+  pinMode(MCVarSpeed, OUTPUT);
+  digitalWrite(MCVarSpeed, LOW);
+  pinMode(MCVSA, OUTPUT);
+  digitalWrite(MCVSA, LOW);
+  pinMode(MCVSB, OUTPUT);
+  digitalWrite(MCVSB, LOW);
+  
   // setup led
   pinMode(led, OUTPUT);
   digitalWrite(led, HIGH);
@@ -64,12 +112,38 @@ void WEHandler()
   // if both outputs change at same time, that's an error
   if (aVal != last_aVal && bVal != last_bVal)
   {
-    WEError = 1;
+    WEError ++;
   }
     
   // Update "last" values
   last_aVal = aVal;
   last_bVal = bVal;
+}
+
+void timerISR()
+{
+  digitalWrite(led, digitalRead(led) ^ 1);
+  countDiff = WECounts - lastCount;
+  
+  if (countDiff > 0)
+  {
+    upwards = true;
+    downwards = false;
+    stall = 0;
+  }
+  else if (countDiff < 0)
+  {
+    upwards = false;
+    downwards = true;
+    stall = 0;
+  }
+  else
+  {
+    upwards = downwards = false;
+    stall++;
+  }
+  
+  lastCount = WECounts;
 }
 
 void splashScreen()
@@ -111,13 +185,143 @@ void comingSoon()
 
 void configTimer()
 {
-  Timer1.initialize(500000);  // initialize timer for 500 ms
+  Timer1.initialize(500000);  // initialize timer for 500 ms (don't do math in function call
   Timer1.attachInterrupt(timerISR);  // attach interrupt to function
 }
 
-void timerISR()
+void MCSpoolOut()
 {
-  digitalWrite(led, digitalRead(led) ^ 1);
+  digitalWrite(MCDirA, HIGH);
+  digitalWrite(MCDirB, LOW);
+}
+
+void MCReelIn()
+{
+  digitalWrite(MCDirA, LOW);
+  digitalWrite(MCDirB, HIGH);
+}
+
+void MCShutOff()
+{
+  digitalWrite(MCDirA, LOW);
+  digitalWrite(MCDirB, LOW);
+  digitalWrite(MCFullSpeed, LOW);
+  digitalWrite(MCVarSpeed, LOW);
+  digitalWrite(MCVSA, LOW);
+  digitalWrite(MCVSB, LOW);
+}
+
+void emergencyLift()
+{
+  while(WECounts < 0)
+  {
+    MCReelIn();
+    digitalWrite(MCFullSpeed, HIGH);
+  }
+  digitalWrite(MCDirA, LOW);
+  digitalWrite(MCDirB, LOW);
+  digitalWrite(MCFullSpeed, LOW);
+}
+
+void assist(int level)
+{
+  if (WECounts < 0)
+  {
+    if (level == 1)
+    {
+      MCReelIn();
+      digitalWrite(MCVarSpeed, HIGH);
+      digitalWrite(MCVSA, HIGH);
+      digitalWrite(MCVSB, LOW);
+    }
+    else if (level == 2)
+    {
+      MCReelIn();
+      digitalWrite(MCVarSpeed, HIGH);
+      digitalWrite(MCVSA, LOW);
+      digitalWrite(MCVSB, HIGH);
+    }
+    else
+    {
+      digitalWrite(MCVarSpeed, LOW);
+      digitalWrite(MCVSA, LOW);
+      digitalWrite(MCVSB, LOW);
+      emergencyLift();
+    }
+  }
+}
+
+void lift()
+{
+  static byte liftState = barInRack;
+  if (calibrateFlag)
+  {
+    while (liftingFlag)  
+    {
+      switch (liftState)
+      {
+        case barInRack:
+          if (analogRead(pressureSensor) == 0)
+          {
+            liftState = upwardState;
+          }
+          break;
+          
+        case downwardState:
+          if (upwards)
+          {
+            liftState = upwardState;
+            break;
+          }
+          if (countDiff > speedThreshold)
+          {
+            emergencyLift();
+            break;
+          }
+          if (WECounts == bottomVal)
+          {
+            liftState = upwardState;
+            break;
+          }
+          
+          break;
+          
+        case upwardState:
+          if (downwards)
+          {
+            emergencyLift();
+            break;
+          }
+          else if (stall)
+          {
+            if(WECounts != topVal)
+            {
+              assist(stall);
+              break;
+            }
+          }
+          break;
+          
+        default:
+          // shouldn't get here
+          break;
+      }
+      
+      delay(100);
+    }
+  }
+  else
+  {
+    lcd.setCursor(0,0);
+    lcd.print("       Error:       ");
+    lcd.setCursor(0,1);
+    lcd.print("  Please Calibrate  ");
+    lcd.setCursor(0,2);
+    lcd.print("        First       ");
+    lcd.setCursor(0,3);
+    lcd.print("                    ");
+    returnToMainMenu = true;
+  }
 }
 
 void setup()
@@ -158,26 +362,51 @@ void loop()
       break;
       
     case selBtnPressed:
-      comingSoon();
-      delay(3000);
+      if (menuRow == 1)
+      {
+        comingSoon();
+        delay(3000);
+        //calibrate();
+      }
+      else if (menuRow == 2)
+      {
+        comingSoon();
+        delay(3000);
+        //liftingFlag = true;
+        //lift();
+      }
+      else if (menuRow == 3)
+      {
+        comingSoon();
+        delay(3000);
+        //statistics();
+      }
+      
+      
       setupMenu();
       myState = waitForInput;
+      
+
       break;
       
     default:
       // blink LED to indicate error
-      digitalWrite(led, !digitalRead(led));
+      //digitalWrite(led, !digitalRead(led));
       break;
   }
   
   noInterrupts();
   int tmpCnt = WECounts;
+  int tmpErr = WEError;
   interrupts();
   
   Serial.print("WE Counts: ");
   Serial.print(tmpCnt);
   Serial.println();
-  Serial.println();  
+//  Serial.print("WE Error: ");
+//  Serial.print(tmpErr);
+//  Serial.println();
+//  Serial.println();  
   
   delay(100);
 }
