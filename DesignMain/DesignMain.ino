@@ -1,3 +1,4 @@
+#include <TimerOne.h>
 #include <LiquidCrystal.h>
 #include <inttypes.h>
 
@@ -108,12 +109,27 @@ void comingSoon()
   lcd.print("                    ");
 }
 
+void configTimer()
+{
+  Timer1.initialize(500000);  // initialize timer for 500 ms
+  Timer1.attachInterrupt(timerISR);  // attach interrupt to function
+}
+
+void timerISR()
+{
+  digitalWrite(led, digitalRead(led) ^ 1);
+}
+
 void setup()
 {
   configPins();
+  configTimer();
+  
   Serial.begin(9600);
+  
   // set up the LCD's number of columns and rows:
   lcd.begin(20,4);
+  
   // Print a message to the LCD.
   splashScreen();
   setupMenu();
