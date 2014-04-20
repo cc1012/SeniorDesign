@@ -223,6 +223,26 @@ void emergencyLift()
   digitalWrite(MCFullSpeed, LOW);
 }
 
+void Calibrate(int count = 0)
+{
+  currentVal = analogRead(pressureSensor);
+  delay(500);
+  lastVal = analogRead(pressureSensor);
+  if (lastVal = currentVal && count < 10 && WECounts >0)
+  {
+    top_measurement = analogRead(pressureSensor);
+    lastVal = currentVal;
+    count++;
+  }
+  else if (lastVal = currentVal && count <10 && WECounts<0)
+    bottom_measurement = analogRead(pressureSensor);
+    count++;
+  else if (lastVal != currentVal)
+  {
+    count = 0;
+  }
+}
+    
 void assist(int level)
 {
   if (WECounts < 0)
