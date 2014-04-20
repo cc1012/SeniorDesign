@@ -223,23 +223,105 @@ void emergencyLift()
   digitalWrite(MCFullSpeed, LOW);
 }
 
-void Calibrate(int count = 0)
+void calibrate()
 {
-  currentVal = analogRead(pressureSensor);
-  delay(500);
-  lastVal = analogRead(pressureSensor);
-  if (lastVal = currentVal && count < 10 && WECounts >0)
+  int weight = readWeight();
+  if ((weight == 45) && (digitalRead(footPedal, LOW)))
   {
-    top_measurement = analogRead(pressureSensor);
-    lastVal = currentVal;
-    count++;
+    while(analogRead(pressureSensor) != 0);
+    
+    int sameCount = 0;
+    int lastCount = WECounts;
+    delay(100);
+    while(sameCount < 10)
+    {
+      if (WECounts == lastCount) sameCount++;
+      lastCount = WECounts;
+      delay(100);
+    }
+    topVal = lastCount;
+    digitalWrite(buzzer, HIGH);
+    delay(500);
+    digitalWrite(buzzer, LOW);
+    
+    while (digitalRead(footPedal, LOW));
+    MCSpoolOut();
+    digitalWrite(MCVarSpeed);
+    digitalWrite(MCVSA);
+    while (digitalRead(footPedal, HIGH));
+    MCShutoff();
+    
+    bottomVal = WECounts;
+       
+    sameCount = 0;
+    lastCount = WECounts;
+    delay(100);
+    while(sameCount < 10)
+    {
+      if (WECounts == lastCount) sameCount++;
+      lastCount = WECounts;
+      delay(100);
+    }
+    bottomVal = lastCount;
+    digitalWrite(buzzer, HIGH);
+    delay(500);
+    digitalWrite(buzzer, LOW);
+    
+    // Error Checking
+    int errorCheck = topVal - bottomVal;
+    if (errorCheck <= 0)
+    {
+      lcd.setCursor(0,0);
+      lcd.print("Error:              ");
+      lcd.setCursor(0,1);
+      lcd.print("Calibration Failed. ");
+      lcd.setCursor(0,2);
+      lcd.print("Please try again.   ");
+      lcd.setCursor(0,3);
+      lcd.print("                    ");
+      calibrateFlag = false;
+      return;  // exit calibrate function
+    }
+    
+    // print values to screen
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Top of Reach: ")
+    lcd.print(topVal);
+    lcd.setCursor(0,1);
+    lcd.print("Chest Val: ");
+    lcd.print(bottomVal);
+    lcd.setCursor(0,2);
+    lcd.print("Correct?");
+    
+    while(true)
+    {
+      if (digitalRead(navBtn) == LOW)
+      {
+        calibrateFlag = true;
+        break;
+      }
+      if (digitalRead(selBtn) == LOW)
+      {
+        calibrateFlag = false;
+        break;
+      }
+    }
   }
-  else if (lastVal = currentVal && count <10 && WECounts<0)
-    bottom_measurement = analogRead(pressureSensor);
-    count++;
-  else if (lastVal != currentVal)
+  else
   {
-    count = 0;
+    // Print error message
+    lcd.setCursor(0,0);
+    lcd.print("Error:              ");
+    lcd.setCursor(0,1);
+    lcd.print("Calibration Failed. ");
+    lcd.setCursor(0,2);
+    lcd.print("Unload bar & ensure "); 
+    lcd.setCursor(0,3);
+    lcd.print("pedal is pressed.   ");
+    digitalWrite(buzzer, HIGH);
+    delay(1000);
+    digitalWrite(buzzer, LOW);
   }
 }
     
@@ -342,6 +424,19 @@ void lift()
     lcd.print("                    ");
     returnToMainMenu = true;
   }
+}
+
+void statistics()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Statistics:         ");
+  lcd.setCursor(0,1);
+  lcd.print("Weight:");
+  lcd.print(weight);
+  lcd.setCursor(0,2);
+  lcd.print("Help: ");
+  lcd.print(helpLevel);
 }
 
 void setup()
