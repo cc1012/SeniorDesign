@@ -1,3 +1,0 @@
-The Automatic Weightlifting Spotter
-
-Let's not have to do this shit over the summer
