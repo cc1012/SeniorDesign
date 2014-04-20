@@ -6,6 +6,7 @@
 const int led = 13;
 const int navBtn = 10;
 const int selBtn = 11;
+const int buzzer = 28;
 
 // Motor Control
 const int MCDirA = 22;
@@ -17,6 +18,10 @@ const int MCVSB = 27;
 
 // Pressure Sensor
 const int pressureSensor = 0;
+int weight = 0;
+
+// foot pedal
+const int footPedal = 1;
 
 // Wheel Encoder variables
 const int WEA = 2;  // int0
@@ -24,6 +29,7 @@ const int WEB = 3;  // int1
 volatile int WECounts = 0;
 volatile int WEError = 0;
 volatile byte last_aVal, last_bVal;
+int helpLevel = 0;
 
 // Timer vals
 volatile int lastCount = 0;
@@ -64,6 +70,13 @@ boolean liftingFlag = false;
 
 void configPins()
 {
+  // foot pedal
+  pinMode(footPedal, INPUT_PULLUP);
+  
+  // buzzer
+  pinMode(buzzer, OUTPUT);
+  digitalWrite(buzzer, LOW);
+  
   // Motor Control
   pinMode(MCDirA, OUTPUT);
   digitalWrite(MCDirA, LOW);
@@ -221,14 +234,29 @@ void emergencyLift()
   digitalWrite(MCDirA, LOW);
   digitalWrite(MCDirB, LOW);
   digitalWrite(MCFullSpeed, LOW);
+  helpLevel = 3;
+}
+
+void readWeight()
+{
+  int digVal = analogRead(pressureSensor);
+  float analogVal = (float) digVal / 1023.0 * 5.0;
+  
+  if (analogVal < 1) weight = 0;
+  else if (analogVal < 2) weight = 45;
+  else if (analogVal < 2.8) weight = 135;
+  else if (analogVal < 3.1) weight = 225;
+  else if (analogVal < 3.3) weight = 315;
+  else if (analogVal < 3.5) weight = 445;
+  else weight = 495;
 }
 
 void calibrate()
 {
-  int weight = readWeight();
-  if ((weight == 45) && (digitalRead(footPedal, LOW)))
+  readWeight();
+  if ((weight == 45) && (digitalRead(footPedal) == LOW))
   {
-    while(analogRead(pressureSensor) != 0);
+    while(analogRead(pressureSensor) > 1);
     
     int sameCount = 0;
     int lastCount = WECounts;
@@ -244,12 +272,12 @@ void calibrate()
     delay(500);
     digitalWrite(buzzer, LOW);
     
-    while (digitalRead(footPedal, LOW));
+    while (digitalRead(footPedal) == LOW);
     MCSpoolOut();
-    digitalWrite(MCVarSpeed);
-    digitalWrite(MCVSA);
-    while (digitalRead(footPedal, HIGH));
-    MCShutoff();
+    digitalWrite(MCVarSpeed, HIGH);
+    digitalWrite(MCVSA, HIGH);
+    while (digitalRead(footPedal) == HIGH);
+    MCShutOff();
     
     bottomVal = WECounts;
        
@@ -286,7 +314,7 @@ void calibrate()
     // print values to screen
     lcd.clear();
     lcd.setCursor(0,0);
-    lcd.print("Top of Reach: ")
+    lcd.print("Top of Reach: ");
     lcd.print(topVal);
     lcd.setCursor(0,1);
     lcd.print("Chest Val: ");
@@ -335,6 +363,7 @@ void assist(int level)
       digitalWrite(MCVarSpeed, HIGH);
       digitalWrite(MCVSA, HIGH);
       digitalWrite(MCVSB, LOW);
+      helpLevel = 1;
     }
     else if (level == 2)
     {
@@ -342,6 +371,7 @@ void assist(int level)
       digitalWrite(MCVarSpeed, HIGH);
       digitalWrite(MCVSA, LOW);
       digitalWrite(MCVSB, HIGH);
+      helpLevel = 2;
     }
     else
     {
@@ -356,15 +386,28 @@ void assist(int level)
 void lift()
 {
   static byte liftState = barInRack;
+  static boolean startFlag = false;
+  
   if (calibrateFlag)
   {
     while (liftingFlag)  
     {
+      if (digitalRead(footPedal) == HIGH)
+      {
+        emergencyLift();
+        break;
+      }
+      if (startFlag && (analogRead(pressureSensor) > 1))
+      {
+        liftingFlag = false;
+        break;
+      }
       switch (liftState)
       {
         case barInRack:
-          if (analogRead(pressureSensor) == 0)
+          if (analogRead(pressureSensor) < 1)
           {
+            startFlag = true;
             liftState = upwardState;
           }
           break;
@@ -437,6 +480,8 @@ void statistics()
   lcd.setCursor(0,2);
   lcd.print("Help: ");
   lcd.print(helpLevel);
+  
+  while((digitalRead(navBtn) == HIGH) && (digitalRead(selBtn) == HIGH));
 }
 
 void setup()
