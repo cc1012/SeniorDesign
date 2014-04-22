@@ -21,7 +21,7 @@ const int pressureSensor = 0;
 int weight = 0;
 
 // foot pedal
-const int footPedal = 1;
+const int footPedal = 52;
 
 // Wheel Encoder variables
 const int WEA = 2;  // int0
