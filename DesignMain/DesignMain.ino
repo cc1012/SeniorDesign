@@ -266,7 +266,7 @@ void readWeight()
   else if (analogVal < 2.8) weight = 135;
   else if (analogVal < 3.1) weight = 225;
   else if (analogVal < 3.3) weight = 315;
-  else if (analogVal < 3.5) weight = 445;
+  else if (analogVal < 3.5) weight = 405;
   else weight = 495;
 }
 
