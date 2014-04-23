@@ -59,9 +59,10 @@ boolean returnToMainMenu = false;
 const byte barInRack = 1;
 const byte downwardState = 2;
 const byte upwardState = 3;
+const byte exitLift = 4;
 
 // defines for calibrate subroutine
-int topVal = 100;
+int topVal = 130;
 int bottomVal = -100;
 
 // flags
@@ -177,11 +178,23 @@ void setupMenu()
   lcd.setCursor(0,0);
   lcd.print("Select an Option:   ");
   lcd.setCursor(0,1);
-  lcd.print(">Lift               ");
+  lcd.print(">Calibrate          ");
   lcd.setCursor(0,2);
-  lcd.print(" Calibrate          ");
+  lcd.print(" Lift               ");
   lcd.setCursor(0,3);
   lcd.print(" Statistics         ");
+}
+
+void liftingScreen()
+{
+  lcd.setCursor(0,0);
+  lcd.print("Lifting State Chosen");
+  lcd.setCursor(0,1);
+  lcd.print("Ready to Spot!      ");
+  lcd.setCursor(0,2);
+  lcd.print("                    ");
+  lcd.setCursor(0,3);
+  lcd.print("                    ");  
 }
 
 void comingSoon()
@@ -226,14 +239,20 @@ void MCShutOff()
 
 void emergencyLift()
 {
-  while(WECounts < 0)
+  // Reel in Rope until bar reaches rack
+  while(WECounts < 20)
   {
     MCReelIn();
     digitalWrite(MCFullSpeed, HIGH);
   }
-  digitalWrite(MCDirA, LOW);
-  digitalWrite(MCDirB, LOW);
-  digitalWrite(MCFullSpeed, LOW);
+  
+  // Bar at rack level, shutoff motor
+  MCShutOff();
+  
+  // Exit lifting loop
+  liftingFlag = false;
+  
+  // Indicate help level for statistics screen
   helpLevel = 3;
 }
 
@@ -355,7 +374,7 @@ void calibrate()
     
 void assist(int level)
 {
-  if (WECounts < 0)
+  if (WECounts < 20)
   {
     if (level == 1)
     {
@@ -381,6 +400,7 @@ void assist(int level)
       emergencyLift();
     }
   }
+  else liftingFlag = false;  // exit lifting loop
 }
 
 void lift()
@@ -390,21 +410,49 @@ void lift()
   
   if (calibrateFlag)
   {
+    // Wait for user to press foot pedal
+    while (true)
+    {
+      // debounce foot pedal
+      if (digitalRead(footPedal) == LOW)
+      {
+        delay(500);
+        if (digitalRead(footPedal) == LOW) break;
+      }
+    }
+    liftingFlag = true;
+    
+    // enter lifting loop
     while (liftingFlag)  
     {
-      if (digitalRead(footPedal) == HIGH)
+      // Emergency lift if foot pedal is released
+      if (digitalRead(footPedal) == HIGH && analogRead(pressureSensor) < 1)
       {
-        emergencyLift();
-        break;
+        // debounce foot pedal
+        delay(500);
+        if (digitalRead(footPedal) == HIGH)
+        {
+          Serial.println("Foot pedal released while lifting");
+          emergencyLift();
+          liftingFlag = false;
+          break;
+        }
       }
+      
+      // Exit lifting routine when bar is placed back in rack
       if (startFlag && (analogRead(pressureSensor) > 1))
       {
         liftingFlag = false;
+        liftState = exitLift;
         break;
       }
+      
+      // Main lifting routine
       switch (liftState)
       {
+        // Wait for bar to be lifted out of rack
         case barInRack:
+          Serial.println("State: barInRack");
           if (analogRead(pressureSensor) < 1)
           {
             startFlag = true;
@@ -413,42 +461,67 @@ void lift()
           break;
           
         case downwardState:
+          Serial.println("State: downwardState");
+          // Go to upwards state if upwards motion detected
           if (upwards)
           {
+            WECounts = 0;  // reset counter to maintain accuracy
             liftState = upwardState;
             break;
           }
+          
+          // Guard against free fall
           if (countDiff > speedThreshold)
           {
+            Serial.println("Freefall detected");
             emergencyLift();
+            liftingFlag = false;
             break;
           }
-          if (WECounts == bottomVal)
-          {
-            liftState = upwardState;
-            break;
-          }
+          
+          // Redundant??
+//          if (WECounts <= bottomVal)
+//          {
+//            liftState = upwardState;
+//            break;
+//          }
           
           break;
           
         case upwardState:
-          if (downwards)
+          Serial.println("State: upward state");
+          // emergency lift if downwards motion detected before user gets to topVal
+          if (downwards && WECounts < (0.85*topVal))
           {
+            Serial.println("downward motion detected before top of lift");
             emergencyLift();
+            liftingFlag = false;
             break;
           }
+          
+          // help user if stall detected
           else if (stall)
           {
-            if(WECounts != topVal)
+            if(WECounts <= (0.85*topVal))
             {
+              Serial.println("Stall detected");
               assist(stall);
               break;
             }
           }
+          
+          // If downward motion is detected at top of lift, go to downward state
+          if (downwards && WECounts >= (0.85*topVal))
+          {
+            liftState = downwardState;
+          }
           break;
           
         default:
-          // shouldn't get here
+          // exit lifting loop
+          Serial.println("Exit lift");
+          liftingFlag = false;
+          MCShutOff();
           break;
       }
       
@@ -530,10 +603,15 @@ void loop()
       }
       else if (menuRow == 2)
       {
-        comingSoon();
-        delay(3000);
-        //liftingFlag = true;
-        //lift();
+//        comingSoon();
+//        delay(3000);
+
+        // Setup and enter lifting routine
+        calibrateFlag = true;
+        WECounts = 100;
+        liftingScreen();
+        lift();
+        
       }
       else if (menuRow == 3)
       {
@@ -560,9 +638,10 @@ void loop()
   int tmpErr = WEError;
   interrupts();
   
-  Serial.print("WE Counts: ");
-  Serial.print(tmpCnt);
-  Serial.println();
+//  Serial.print("WE Counts: ");
+//  Serial.print(tmpCnt);
+//  Serial.println();
+  
 //  Serial.print("WE Error: ");
 //  Serial.print(tmpErr);
 //  Serial.println();
